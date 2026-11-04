@@ -1,0 +1,453 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Kameti</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Manrope:wght@400;500;700;800&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="style.css">
+</head>
+<body data-auth="out">
+
+<!--
+JS HOOKS GUIDE
+- Views:      <section class="view" id="view-NAME">. Show one at a time: remove [hidden] from it, add [hidden] to the rest.
+- Login state: set document.body.dataset.auth = "in" | "out" and document.body.dataset.role = "admin" | "member".
+              CSS then shows/hides every [data-auth] and [data-role] element by itself (no JS per element).
+              Page starts as "out": nav shows only "Log in". Set it to "in" after a successful login.
+- Actions:    [data-action="..."] on buttons. Use ONE click listener on document and switch on dataset.action.
+- Forms:      <form id="form-..."> with named inputs. Read with new FormData(form). Errors go in the form's .form-error.
+- Lists:      containers with id="...-list" or "...-body". Clone the matching <template id="tpl-..."> and fill [data-field="..."] with textContent (never innerHTML).
+- Row ids:    put database ids on the cloned root: row.dataset.id = ...
+- Money:      store integers. Format only when rendering.
+-->
+
+<header class="topbar">
+  <a class="brand" href="#" data-action="go-home">Kameti</a>
+  <nav class="nav" aria-label="Main">
+    <button class="nav-link" data-action="go-home" data-auth="in">Home</button>
+    <button class="nav-link" data-action="go-notifications" data-auth="in">
+      Notifications <span class="badge" id="notif-count" hidden>0</span>
+    </button>
+    <span class="who" id="user-name" data-auth="in"></span>
+    <button class="btn btn-quiet" data-action="logout" data-auth="in">Log out</button>
+    <button class="btn btn-quiet" data-action="go-login" data-auth="out">Log in</button>
+  </nav>
+</header>
+
+<!-- ========== AUTH SHELL (login, signups, join). Hides itself when no auth view is visible. ========== -->
+<div class="auth-shell">
+  <aside class="auth-aside">
+    <div class="aside-copy">
+      <h2 class="aside-title">Every Kameti, every month, on record.</h2>
+      <ul class="aside-points">
+        <li><strong>Who has paid</strong>Mark payments and see what is still to collect.</li>
+        <li><strong>Whose turn it is</strong>The payout order is fixed and the same for everyone.</li>
+        <li><strong>Who to remind</strong>Email every unpaid member in one click.</li>
+      </ul>
+    </div>
+    <div class="aside-ring" aria-hidden="true">
+      <span style="--i:0"></span><span style="--i:1"></span><span style="--i:2"></span><span style="--i:3"></span>
+      <span style="--i:4"></span><span style="--i:5"></span><span style="--i:6"></span><span style="--i:7"></span>
+    </div>
+  </aside>
+  <div class="auth-pane">
+  <!-- ========== AUTH ========== -->
+  <section class="view auth-view" id="view-login">
+    <div class="card auth-card">
+      <h1>Log in</h1>
+      <form id="form-login" novalidate>
+        <label class="field">Email<input type="email" name="email" autocomplete="email" required></label>
+        <label class="field">Password<input type="password" name="password" autocomplete="current-password" required></label>
+        <p class="form-error" role="alert" hidden></p>
+        <button class="btn btn-primary" type="submit">Log in</button>
+      </form>
+      <p class="alt">New here?
+        <button class="link" data-action="go-signup-admin">Create an admin account</button> or
+        <button class="link" data-action="go-signup-member">join as a member</button>
+      </p>
+    </div>
+  </section>
+
+  <section class="view auth-view" id="view-signup-admin" hidden>
+    <div class="card auth-card">
+      <h1>Create an admin account</h1>
+      <p class="muted">For people who run Kametis. You can run as many as you like.</p>
+      <form id="form-signup-admin" novalidate>
+        <label class="field">Full name<input type="text" name="name" autocomplete="name" required></label>
+        <label class="field">Email<input type="email" name="email" autocomplete="email" required></label>
+        <label class="field">Password<input type="password" name="password" minlength="8" autocomplete="new-password" required>
+          <small>At least 8 characters.</small></label>
+        <p class="form-error" role="alert" hidden></p>
+        <button class="btn btn-primary" type="submit">Create admin account</button>
+      </form>
+      <p class="alt">Already have an account? <button class="link" data-action="go-login">Log in</button></p>
+    </div>
+  </section>
+
+  <section class="view auth-view" id="view-signup-member" hidden>
+    <div class="card auth-card">
+      <h1>Create a member account</h1>
+      <p class="muted">For people who pay into Kametis. Use the email your admin invited.</p>
+      <form id="form-signup-member" novalidate>
+        <label class="field">Full name<input type="text" name="name" autocomplete="name" required></label>
+        <label class="field">Email<input type="email" name="email" autocomplete="email" required></label>
+        <label class="field">Password<input type="password" name="password" minlength="8" autocomplete="new-password" required>
+          <small>At least 8 characters.</small></label>
+        <p class="form-error" role="alert" hidden></p>
+        <button class="btn btn-primary" type="submit">Create member account</button>
+      </form>
+      <p class="alt">Already have an account? <button class="link" data-action="go-login">Log in</button></p>
+    </div>
+  </section>
+
+  <!-- ========== JOIN BY CODE (/join/CODE) ========== -->
+  <section class="view auth-view" id="view-join" hidden>
+    <div class="card auth-card">
+      <h1>Join a Kameti</h1>
+      <div id="join-preview">
+        <p class="join-name" data-field="Kameti-name"></p>
+        <p class="muted"><span data-field="admin-name"></span> · Rs <span data-field="monthly-amount"></span> per month</p>
+      </div>
+      <p class="muted">Your admin must approve your request before you become an active member.</p>
+      <p class="form-error" id="join-error" role="alert" hidden></p>
+      <button class="btn btn-primary" data-action="request-join">Request to join</button>
+    </div>
+  </section>
+
+  </div>
+</div>
+
+<main class="page">
+
+  <!-- ========== ADMIN: HOME ========== -->
+  <section class="view" id="view-admin-home" data-role="admin" hidden>
+    <div class="page-head">
+      <h1>Your Kametis</h1>
+      <button class="btn btn-primary" data-action="open-Kameti-dialog">New Kameti</button>
+    </div>
+    <div class="stat-row">
+      <div class="stat"><span class="stat-num" id="stat-Kametis">0</span><span class="stat-label">Kametis</span></div>
+      <div class="stat"><span class="stat-num" id="stat-members">0</span><span class="stat-label">Active members</span></div>
+      <div class="stat"><span class="stat-num" id="stat-unpaid">0</span><span class="stat-label">Unpaid this month</span></div>
+      <div class="stat"><span class="stat-num" id="stat-pending-approvals">0</span><span class="stat-label">Waiting for approval</span></div>
+    </div>
+    <div class="card-grid" id="Kameti-list"></div>
+    <p class="empty" id="Kameti-empty" hidden>No Kametis yet. Create your first one to start tracking payments.</p>
+  </section>
+
+  <!-- ========== ADMIN: ONE Kameti ========== -->
+  <section class="view" id="view-Kameti" data-role="admin" hidden>
+    <button class="link back" data-action="back-to-admin-home">‹ All Kametis</button>
+    <div class="page-head">
+      <div>
+        <h1 id="Kameti-title"></h1>
+        <p class="muted" id="Kameti-meta"></p>
+      </div>
+      <label class="field inline">Cycle
+        <select id="cycle-select"></select>
+      </label>
+    </div>
+
+    <div class="summary">
+      <div class="summary-block">
+        <span class="stat-label">Collected</span>
+        <span class="stat-num" id="sum-collected">Rs 0</span>
+      </div>
+      <div class="summary-block">
+        <span class="stat-label">Still to collect</span>
+        <span class="stat-num warn" id="sum-pending">Rs 0</span>
+      </div>
+      <div class="summary-block payout">
+        <span class="stat-label">This month’s payout goes to</span>
+        <span class="stat-num" id="sum-payout-name">—</span>
+        <span class="muted" id="sum-payout-turn"></span>
+      </div>
+    </div>
+
+    <div class="tabs" role="tablist">
+      <button class="tab is-active" role="tab" data-tab="payments">Payments</button>
+      <button class="tab" role="tab" data-tab="members">Members</button>
+      <button class="tab" role="tab" data-tab="cycles">Cycles</button>
+      <button class="tab" role="tab" data-tab="invites">Invites</button>
+    </div>
+
+    <!-- Payments -->
+    <div class="panel" data-panel="payments">
+      <div class="toolbar">
+        <div class="seg" role="group" aria-label="Filter">
+          <button class="seg-btn is-active" data-filter="all">All</button>
+          <button class="seg-btn" data-filter="paid">Paid</button>
+          <button class="seg-btn" data-filter="unpaid">Unpaid</button>
+        </div>
+        <button class="btn" data-action="remind-all">Remind all unpaid</button>
+      </div>
+      <div class="table-wrap">
+        <table class="table">
+          <thead><tr><th>Member</th><th>Turn</th><th>Amount</th><th>Status</th><th>Source</th><th>Paid on</th><th></th></tr></thead>
+          <tbody id="payments-body"></tbody>
+        </table>
+      </div>
+      <p class="empty" id="payments-empty" hidden>No members in this cycle yet.</p>
+    </div>
+
+    <!-- Members -->
+    <div class="panel" data-panel="members" hidden>
+      <h2>Waiting for approval</h2>
+      <ul class="list" id="pending-list"></ul>
+      <p class="empty" id="pending-empty" hidden>Nobody is waiting.</p>
+
+      <h2>Active members</h2>
+      <p class="muted">Payout turn is fixed. Change it only if members agree.</p>
+      <div class="table-wrap">
+        <table class="table">
+          <thead><tr><th>Member</th><th>Email</th><th>Payout turn</th><th>Joined</th><th></th></tr></thead>
+          <tbody id="members-body"></tbody>
+        </table>
+      </div>
+      <p class="muted" id="members-count"></p>
+    </div>
+
+    <!-- Cycles -->
+    <div class="panel" data-panel="cycles" hidden>
+      <div class="toolbar">
+        <h2>Monthly cycles</h2>
+        <button class="btn" data-action="create-next-cycle">Create next cycle</button>
+      </div>
+      <div class="table-wrap">
+        <table class="table">
+          <thead><tr><th>Cycle</th><th>Due date</th><th>Payout to</th><th>Collected</th></tr></thead>
+          <tbody id="cycles-body"></tbody>
+        </table>
+      </div>
+    </div>
+
+    <!-- Invites -->
+    <div class="panel" data-panel="invites" hidden>
+      <div class="two-col">
+        <div class="card">
+          <h2>Add by email</h2>
+          <p class="muted">The person gets an email and must accept before they join.</p>
+          <form id="form-invite-email" novalidate>
+            <label class="field">Email<input type="email" name="email" required></label>
+            <p class="form-error" role="alert" hidden></p>
+            <button class="btn btn-primary" type="submit">Send invite</button>
+          </form>
+        </div>
+        <div class="card">
+          <h2>Invite code or link</h2>
+          <form id="form-invite-code" novalidate>
+            <label class="field">Expires after (days)<input type="number" name="expires_days" min="1" max="30" value="7"></label>
+            <label class="field">Max uses<input type="number" name="max_uses" min="1" max="50" value="5"></label>
+            <p class="form-error" role="alert" hidden></p>
+            <button class="btn btn-primary" type="submit">Create code</button>
+          </form>
+        </div>
+      </div>
+      <h2>Active invites</h2>
+      <ul class="list" id="invites-list"></ul>
+      <p class="empty" id="invites-empty" hidden>No active invites.</p>
+    </div>
+  </section>
+
+  <!-- ========== MEMBER: HOME ========== -->
+  <section class="view" id="view-member-home" data-role="member" hidden>
+    <div class="page-head">
+      <h1>Your Kametis</h1>
+      <button class="btn" data-action="open-join-dialog">Join with a code</button>
+    </div>
+    <div class="card-grid" id="member-Kameti-list"></div>
+    <p class="empty" id="member-empty" hidden>You are not in any Kameti yet. Ask your admin for an invite, or join with a code.</p>
+
+    <h2>Pending email invites</h2>
+    <ul class="list" id="my-invites-list"></ul>
+    <p class="empty" id="my-invites-empty" hidden>No pending invites.</p>
+  </section>
+
+  <!-- ========== MEMBER: ONE Kameti ========== -->
+  <section class="view" id="view-member-Kameti" data-role="member" hidden>
+    <button class="link back" data-action="back-to-member-home">‹ All Kametis</button>
+    <div class="page-head">
+      <div>
+        <h1 id="mc-title"></h1>
+        <p class="muted" id="mc-meta"></p>
+      </div>
+    </div>
+    <div class="summary">
+      <div class="summary-block"><span class="stat-label">Your status this month</span><span class="pill" id="mc-status"></span></div>
+      <div class="summary-block"><span class="stat-label">You pay</span><span class="stat-num" id="mc-amount">Rs 0</span></div>
+      <div class="summary-block payout"><span class="stat-label">Your payout turn</span><span class="stat-num" id="mc-turn">—</span><span class="muted" id="mc-payout-date"></span></div>
+    </div>
+    <h2>Your payment history</h2>
+    <div class="table-wrap">
+      <table class="table">
+        <thead><tr><th>Cycle</th><th>Due date</th><th>Amount</th><th>Status</th><th>Paid on</th></tr></thead>
+        <tbody id="mc-history-body"></tbody>
+      </table>
+    </div>
+  </section>
+
+  <!-- ========== NOTIFICATIONS ========== -->
+  <section class="view" id="view-notifications" hidden>
+    <div class="page-head">
+      <h1>Notifications</h1>
+      <button class="btn" data-action="mark-all-seen">Mark all as read</button>
+    </div>
+    <ul class="list" id="notifications-list"></ul>
+    <p class="empty" id="notifications-empty" hidden>Nothing new.</p>
+  </section>
+
+</main>
+
+<!-- ========== DIALOGS ========== -->
+<dialog id="dlg-Kameti">
+  <form id="form-Kameti" method="dialog" novalidate>
+    <h2>New Kameti</h2>
+    <label class="field">Name<input type="text" name="name" required></label>
+    <label class="field">Monthly amount (Rs)<input type="number" name="monthly_amount" min="1" step="1" required></label>
+    <label class="field">Total members<input type="number" name="max_members" min="2" step="1" required></label>
+    <label class="field">Start date<input type="date" name="start_date" required></label>
+    <p class="form-error" role="alert" hidden></p>
+    <div class="dlg-actions">
+      <button class="btn btn-quiet" type="button" data-action="close-dialog">Cancel</button>
+      <button class="btn btn-primary" type="submit">Create Kameti</button>
+    </div>
+  </form>
+</dialog>
+
+<dialog id="dlg-join">
+  <form id="form-join-code" method="dialog" novalidate>
+    <h2>Join with a code</h2>
+    <label class="field">Invite code<input type="text" name="code" autocomplete="off" required></label>
+    <p class="form-error" role="alert" hidden></p>
+    <div class="dlg-actions">
+      <button class="btn btn-quiet" type="button" data-action="close-dialog">Cancel</button>
+      <button class="btn btn-primary" type="submit">Request to join</button>
+    </div>
+  </form>
+</dialog>
+
+<dialog id="dlg-confirm">
+  <h2 id="confirm-title">Are you sure?</h2>
+  <p class="muted" id="confirm-text"></p>
+  <div class="dlg-actions">
+    <button class="btn btn-quiet" data-action="close-dialog">Cancel</button>
+    <button class="btn btn-danger" data-action="confirm-yes">Confirm</button>
+  </div>
+</dialog>
+
+<div class="toast" id="toast" role="status" aria-live="polite" hidden></div>
+
+<!-- ========== TEMPLATES (clone these from JS) ========== -->
+
+<template id="tpl-Kameti-card"> <!-- admin home -->
+  <article class="card Kameti-card" data-action="open-Kameti">
+    <h3 data-field="name"></h3>
+    <p class="muted">Rs <span data-field="monthly-amount"></span> per month · <span data-field="member-count"></span> members</p>
+    <div class="bar"><span class="bar-fill" data-field="progress"></span></div>
+    <p class="muted"><span data-field="paid-count"></span> paid this month · <span data-field="unpaid-count"></span> unpaid</p>
+    <span class="pill" data-field="status"></span>
+  </article>
+</template>
+
+<template id="tpl-member-Kameti-card"> <!-- member home -->
+  <article class="card Kameti-card" data-action="open-member-Kameti">
+    <h3 data-field="name"></h3>
+    <p class="muted">Admin: <span data-field="admin-name"></span> · Rs <span data-field="monthly-amount"></span> per month</p>
+    <p>Your turn: <strong data-field="turn"></strong></p>
+    <span class="pill" data-field="status"></span>
+  </article>
+</template>
+
+<template id="tpl-payment-row">
+  <tr>
+    <td data-field="name"></td>
+    <td data-field="turn"></td>
+    <td data-field="amount"></td>
+    <td><span class="pill" data-field="status"></span></td>
+    <td data-field="source"></td>
+    <td data-field="paid-at"></td>
+    <td class="row-actions">
+      <button class="btn btn-small" data-action="toggle-paid"></button>
+      <button class="btn btn-small btn-quiet" data-action="remind-one">Remind</button>
+    </td>
+  </tr>
+</template>
+
+<template id="tpl-member-row">
+  <tr>
+    <td data-field="name"></td>
+    <td data-field="email"></td>
+    <td><input class="turn-input" type="number" min="1" data-field="turn-input" aria-label="Payout turn"></td>
+    <td data-field="joined"></td>
+    <td class="row-actions">
+      <button class="btn btn-small" data-action="save-turn">Save turn</button>
+      <button class="btn btn-small btn-danger" data-action="remove-member">Remove</button>
+    </td>
+  </tr>
+</template>
+
+<template id="tpl-pending-row">
+  <li class="list-item">
+    <div><strong data-field="name"></strong> <span class="muted" data-field="email"></span></div>
+    <div class="row-actions">
+      <button class="btn btn-small btn-primary" data-action="approve-member">Approve</button>
+      <button class="btn btn-small btn-quiet" data-action="reject-member">Reject</button>
+    </div>
+  </li>
+</template>
+
+<template id="tpl-cycle-row">
+  <tr>
+    <td data-field="cycle-no"></td>
+    <td data-field="due-date"></td>
+    <td data-field="payout-name"></td>
+    <td data-field="collected"></td>
+  </tr>
+</template>
+
+<template id="tpl-invite-row">
+  <li class="list-item">
+    <div>
+      <strong data-field="label"></strong>
+      <span class="muted" data-field="detail"></span>
+    </div>
+    <div class="row-actions">
+      <button class="btn btn-small" data-action="copy-invite-link">Copy link</button>
+      <button class="btn btn-small btn-danger" data-action="revoke-invite">Revoke</button>
+    </div>
+  </li>
+</template>
+
+<template id="tpl-my-invite-row"> <!-- member: email invites waiting for acceptance -->
+  <li class="list-item">
+    <div><strong data-field="Kameti-name"></strong> <span class="muted" data-field="admin-name"></span></div>
+    <div class="row-actions">
+      <button class="btn btn-small btn-primary" data-action="accept-invite">Accept</button>
+      <button class="btn btn-small btn-quiet" data-action="decline-invite">Decline</button>
+    </div>
+  </li>
+</template>
+
+<template id="tpl-history-row">
+  <tr>
+    <td data-field="cycle-no"></td>
+    <td data-field="due-date"></td>
+    <td data-field="amount"></td>
+    <td><span class="pill" data-field="status"></span></td>
+    <td data-field="paid-at"></td>
+  </tr>
+</template>
+
+<template id="tpl-notification">
+  <li class="list-item notification">
+    <p data-field="message"></p>
+    <span class="muted" data-field="created-at"></span>
+  </li>
+</template>
+
+<script src="app.js" defer></script>
+</body>
+</html>
